@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ReviewRay — детектор накрученных отзывов</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #6366f1;
+      --accent2: #818cf8;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --orange: #f97316;
+      --red: #ef4444;
+      --radius: 12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 80px;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #6366f1, #a78bfa, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .logo span { opacity: 0.6; font-weight: 400; }
+    .tagline {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    /* Input card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .url-input {
+      flex: 1;
+      min-width: 200px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .url-input:focus { border-color: var(--accent); }
+    .url-input::placeholder { color: var(--muted); }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--accent2); }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .comment-input {
+      margin-top: 10px;
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      padding: 10px 16px;
+      outline: none;
+      resize: vertical;
+      min-height: 60px;
+      transition: border-color 0.2s;
+    }
+    .comment-input:focus { border-color: var(--accent); }
+    .comment-input::placeholder { color: var(--muted); }
+
+    .platforms {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .platforms b { color: var(--text); }
+
+    /* Loader */
+    .loader {
+      display: none;
+      margin: 32px auto;
+      text-align: center;
+      color: var(--muted);
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Result card */
+    .result { display: none; margin-top: 24px; width: 100%; max-width: 680px; }
+
+    .score-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .score-circle {
+      width: 96px; height: 96px;
+      border-radius: 50%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 4px solid;
+      font-weight: 800;
+    }
+    .score-circle .num { font-size: 1.8rem; line-height: 1; }
+    .score-circle .label { font-size: 0.65rem; opacity: 0.7; margin-top: 2px; }
+
+    .score-low    { border-color: var(--green);  color: var(--green); }
+    .score-medium { border-color: var(--yellow); color: var(--yellow); }
+    .score-high   { border-color: var(--orange); color: var(--orange); }
+    .score-critical { border-color: var(--red); color: var(--red); }
+
+    .score-info { flex: 1; min-width: 200px; }
+    .product-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 380px;
+    }
+    .verdict-text {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .meta {
+      margin-top: 8px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    /* Signals */
+    .signals-title {
+      margin: 20px 0 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .signal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .signal-bar-wrap {
+      flex-shrink: 0;
+      width: 56px;
+      text-align: center;
+    }
+    .signal-score-num {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .signal-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      margin-top: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+    .signal-bar-fill {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      border-radius: 2px;
+      transition: width 0.6s ease;
+    }
+    .signal-body { flex: 1; }
+    .signal-name {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .signal-details {
+      font-size: 0.83rem;
+      color: var(--muted);
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
+    /* Error */
+    .error-box {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      padding: 16px;
+      color: var(--red);
+      font-size: 0.9rem;
+      margin-top: 16px;
+      display: none;
+    }
+
+    /* Examples */
+    .examples {
+      margin-top: 14px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .examples span {
+      font-weight: 500;
+      color: var(--muted);
+      margin-right: 4px;
+    }
+    .ex-link {
+      color: var(--accent2);
+      cursor: pointer;
+      text-decoration: underline;
+      margin-right: 8px;
+    }
+    .ex-link:hover { color: var(--text); }
+
+    @media (max-width: 520px) {
+      .score-card { flex-direction: column; }
+      .score-circle { width: 80px; height: 80px; }
+      .score-circle .num { font-size: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">Review<span>Ray</span> 🔍</div>
+    <p class="tagline">Вставьте ссылку на товар — узнайте, накручены ли отзывы</p>
+  </div>
+
+  <div class="card">
+    <div class="input-row">
+      <input
+        id="url-input"
+        class="url-input"
+        type="text"
+        placeholder="https://www.amazon.com/dp/... или wildberries.ru/catalog/..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button class="btn" id="analyze-btn" onclick="runAnalysis()">Проверить</button>
+    </div>
+    <textarea
+      id="comment-input"
+      class="comment-input"
+      placeholder="Опциональный комментарий (что вас насторожило?)"
+    ></textarea>
+    <div class="platforms">
+      Поддерживаются: <b>Amazon</b> (US, UK, DE, FR…) · <b>Wildberries</b>
+    </div>
+    <div class="examples">
+      <span>Примеры:</span>
+      <a class="ex-link" onclick="setExample('https://www.amazon.com/dp/B07PXGQC1Q')">Amazon</a>
+      <a class="ex-link" onclick="setExample('https://www.wildberries.ru/catalog/123456789/detail.aspx')">Wildberries</a>
+    </div>
+  </div>
+
+  <div class="error-box" id="error-box"></div>
+
+  <div class="loader" id="loader">
+    <div class="spinner"></div>
+    Анализируем отзывы…
+  </div>
+
+  <div class="result" id="result">
+    <div class="score-card" id="score-card">
+      <div class="score-circle" id="score-circle">
+        <div class="num" id="score-num">—</div>
+        <div class="label">TRUST</div>
+      </div>
+      <div class="score-info">
+        <div class="product-name" id="product-name"></div>
+        <div class="verdict-text" id="verdict-text"></div>
+        <div class="meta" id="meta"></div>
+      </div>
+    </div>
+
+    <div class="signals-title">Детали анализа</div>
+    <div id="signals-list"></div>
+  </div>
+
+<script>
+const SIGNAL_NAMES = {
+  rating_distribution: 'Распределение оценок',
+  review_velocity: 'Всплески публикаций',
+  verified_ratio: 'Подтверждённые покупки',
+  text_similarity: 'Уникальность текстов',
+  reviewer_diversity: 'Разнообразие рецензентов',
+};
+
+function setExample(url) {
+  document.getElementById('url-input').value = url;
+}
+
+function scoreColor(level) {
+  return {
+    low: 'var(--green)',
+    medium: 'var(--yellow)',
+    high: 'var(--orange)',
+    critical: 'var(--red)',
+  }[level] || 'var(--muted)';
+}
+
+function scoreClass(level) {
+  return 'score-' + level;
+}
+
+function signalColor(score) {
+  if (score >= 0.75) return 'var(--green)';
+  if (score >= 0.45) return 'var(--yellow)';
+  if (score >= 0.20) return 'var(--orange)';
+  return 'var(--red)';
+}
+
+async function runAnalysis() {
+  const url = document.getElementById('url-input').value.trim();
+  const comment = document.getElementById('comment-input').value.trim();
+  if (!url) return;
+
+  // UI reset
+  document.getElementById('error-box').style.display = 'none';
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('loader').style.display = 'block';
+  document.getElementById('analyze-btn').disabled = true;
+
+  try {
+    const resp = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, comment: comment || null }),
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(data.detail || `Ошибка ${resp.status}`);
+    }
+
+    renderResult(data);
+  } catch (e) {
+    const box = document.getElementById('error-box');
+    box.textContent = '❌ ' + e.message;
+    box.style.display = 'block';
+  } finally {
+    document.getElementById('loader').style.display = 'none';
+    document.getElementById('analyze-btn').disabled = false;
+  }
+}
+
+function renderResult(data) {
+  // Score circle
+  const circle = document.getElementById('score-circle');
+  circle.className = 'score-circle ' + scoreClass(data.risk_level);
+  document.getElementById('score-num').textContent = data.trust_score;
+
+  // Info
+  document.getElementById('product-name').textContent = data.product_name || data.url;
+  document.getElementById('verdict-text').textContent = data.verdict;
+  document.getElementById('meta').textContent =
+    `${data.total_reviews.toLocaleString()} отзывов · ${data.platform} · ${new Date(data.analyzed_at).toLocaleTimeString('ru-RU')}`;
+
+  // Signals
+  const list = document.getElementById('signals-list');
+  list.innerHTML = '';
+  for (const s of data.signals) {
+    const pct = Math.round(s.score * 100);
+    const color = signalColor(s.score);
+    const el = document.createElement('div');
+    el.className = 'signal';
+    el.innerHTML = `
+      <div class="signal-bar-wrap">
+        <div class="signal-score-num" style="color:${color}">${pct}</div>
+        <div class="signal-bar">
+          <div class="signal-bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+      </div>
+      <div class="signal-body">
+        <div class="signal-name">${SIGNAL_NAMES[s.name] || s.name}</div>
+        <div class="signal-details">${s.details || s.description}</div>
+      </div>
+    `;
+    list.appendChild(el);
+  }
+
+  document.getElementById('result').style.display = 'block';
+}
+
+// Enter key
+document.getElementById('url-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runAnalysis();
+});
+</script>
+</body>
+</html>
