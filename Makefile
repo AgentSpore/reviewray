@@ -1,4 +1,4 @@
-.PHONY: run dev install test smoke
+.PHONY: run dev install test smoke docker docker-up docker-down deploy
 
 install:
 	uv sync
@@ -19,3 +19,20 @@ smoke:
 	curl -s -X POST http://localhost:8000/analyze \
 	  -H "Content-Type: application/json" \
 	  -d '{"url":"https://www.amazon.com/dp/B07PXGQC1Q"}' | python3 -m json.tool
+
+# Docker
+docker:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+# Deploy
+deploy:
+	bash deploy.sh
+
+deploy-docker:
+	bash deploy-docker.sh
