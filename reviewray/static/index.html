@@ -253,6 +253,18 @@
       line-height: 1.4;
     }
 
+    /* Warning */
+    .warning-box {
+      background: rgba(234,179,8,0.1);
+      border: 1px solid rgba(234,179,8,0.3);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: var(--yellow);
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+      display: none;
+    }
+
     /* Error */
     .error-box {
       background: rgba(239,68,68,0.1);
@@ -304,7 +316,7 @@
         id="url-input"
         class="url-input"
         type="text"
-        placeholder="https://www.amazon.com/dp/... или wildberries.ru/catalog/..."
+        placeholder="amazon.com · wildberries.ru · ozon.ru · yandex.ru/maps"
         autocomplete="off"
         spellcheck="false"
       />
@@ -316,12 +328,14 @@
       placeholder="Опциональный комментарий (что вас насторожило?)"
     ></textarea>
     <div class="platforms">
-      Поддерживаются: <b>Amazon</b> (US, UK, DE, FR…) · <b>Wildberries</b>
+      Поддерживаются: <b>Amazon</b> (US, UK, DE, FR…) · <b>Wildberries</b> · <b>Ozon</b> · <b>Яндекс.Карты</b>
     </div>
     <div class="examples">
       <span>Примеры:</span>
-      <a class="ex-link" onclick="setExample('https://www.amazon.com/dp/B07PXGQC1Q')">Amazon</a>
-      <a class="ex-link" onclick="setExample('https://www.wildberries.ru/catalog/123456789/detail.aspx')">Wildberries</a>
+      <a class="ex-link" onclick="setExample('https://www.amazon.com/dp/B09V3KXJPB')">Amazon</a>
+      <a class="ex-link" onclick="setExample('https://www.wildberries.ru/catalog/211694539/detail.aspx')">Wildberries</a>
+      <a class="ex-link" onclick="setExample('https://www.ozon.ru/product/smartfon-apple-iphone-15-128-gb-chernyy-1568612253/')">Ozon</a>
+      <a class="ex-link" onclick="setExample('https://yandex.ru/maps/org/shokoladnitsa/1124715036/')">Яндекс.Карты</a>
     </div>
   </div>
 
@@ -333,6 +347,7 @@
   </div>
 
   <div class="result" id="result">
+    <div class="warning-box" id="warning-box"></div>
     <div class="score-card" id="score-card">
       <div class="score-circle" id="score-circle">
         <div class="num" id="score-num">—</div>
@@ -418,6 +433,15 @@ async function runAnalysis() {
 }
 
 function renderResult(data) {
+  // Warning
+  const warnBox = document.getElementById('warning-box');
+  if (data.warning) {
+    warnBox.textContent = data.warning;
+    warnBox.style.display = 'block';
+  } else {
+    warnBox.style.display = 'none';
+  }
+
   // Score circle
   const circle = document.getElementById('score-circle');
   circle.className = 'score-circle ' + scoreClass(data.risk_level);
