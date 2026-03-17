@@ -4,7 +4,37 @@
 
 ## Why ReviewRay?
 
-Fakespot shut down in July 2025. ReviewMeta went dark in early 2026. **10+ million users** are now without a reliable fake review checker. ReviewRay fills the gap — with multi-platform support and transparent signal-based scoring.
+Fakespot shut down in July 2025. ReviewMeta went dark in early 2026. **10+ million users** are now without a reliable fake review checker. ReviewRay fills the gap — with multi-platform support, transparent signal-based scoring, and open-source code.
+
+## Competitive Landscape
+
+The fake review detection space lost its two biggest players in 2025–2026. Here's how the remaining tools compare:
+
+| Tool | Platforms | Approach | Pricing | Open Source | Status |
+|------|-----------|----------|---------|-------------|--------|
+| **ReviewRay** | Amazon (20+ domains), Wildberries | 5 independent signals, trust score 0–100 | Free tier + Pro $9/mo + API | ✅ Yes | Active |
+| **Fakespot** | Was: Amazon, Walmart, eBay, Best Buy | NLP + letter grades | Free | No | ❌ **Shut down** Jul 2025 |
+| **ReviewMeta** | Was: Amazon only | Adjusted rating, review stripping | Free | No | ❌ **Down** since early 2026 |
+| **RateBud** | Amazon (20+ domains) | AI trust grades A–F, 15+ NLP signals | Free (affiliate-funded) | No | Active |
+| **FakeFind** | Amazon, Walmart, eBay, Best Buy, Sephora, Etsy, AliExpress | AI trust score 1–10, sentiment analysis | Free | No | Active |
+| **Null Fake** | Amazon only | GPT-4 per-review analysis, adjusted rating | Free | ✅ MIT | Active |
+| **Savino** | Amazon only | Chrome extension, review scoring | Free | No | Active |
+| **TraceFuse** | Amazon only | Seller-focused: violation flagging + removal | Pay-per-removal | No | Active |
+| **Buydit** | Reddit-based | Surfaces real Reddit opinions instead of reviews | Free | No | Active |
+
+### How ReviewRay Differs
+
+1. **Multi-platform from day one.** Most competitors are Amazon-only. ReviewRay supports Wildberries (RU market) with Google Maps, Trustpilot, and App Store coming in v1.1–1.2.
+2. **Transparent scoring.** Every signal is visible with individual scores and weights — no black-box grades.
+3. **Open source.** Full codebase available. Null Fake is also open source but requires GPT-4 API ($$). ReviewRay runs entirely locally with zero API costs.
+4. **API-first.** REST API for integrating fake review checks into any product, browser extension, or automation.
+5. **Russian market.** Only tool supporting Wildberries — 50M+ monthly users with zero review verification tools.
+
+### What Happened to the Market Leaders?
+
+- **Fakespot** was acquired by Mozilla in 2023, integrated into Firefox as "Review Checker," then discontinued entirely on July 1, 2025. The extension, app, and website are gone.
+- **ReviewMeta** stopped loading in early 2026 with no official announcement. Its signature "adjusted rating" feature — stripping suspicious reviews and recalculating stars — is no longer available.
+- **~30% of online reviews** are estimated to be fake (FTC, 2025). The EU Digital Services Act (DSA) now requires platforms to actively fight fake reviews.
 
 ## Features
 
@@ -30,6 +60,23 @@ make run
 
 # Open browser
 open http://localhost:8000
+```
+
+### Docker
+
+```bash
+# Build and run
+make deploy-docker
+
+# Or manually
+docker compose up -d
+```
+
+### Bare Metal Deploy
+
+```bash
+# Installs uv if missing, runs with 2 workers
+make deploy
 ```
 
 ## API
@@ -58,8 +105,7 @@ curl -X POST http://localhost:8000/analyze \
       "score": 0.6,
       "weight": 0.25,
       "details": "Слегка завышенная доля пятёрок (78%)."
-    },
-    ...
+    }
   ],
   "verdict": "\"Echo Dot\" — есть отдельные подозрительные сигналы. Trust Score 72/100.",
   "analyzed_at": "2026-03-17T10:42:00+00:00"
@@ -93,10 +139,11 @@ curl -X POST http://localhost:8000/analyze \
 
 ## Market Context
 
-- Fakespot: **SHUT DOWN** July 1, 2025 (Mozilla discontinued)
-- ReviewMeta: **DOWN** since early 2026
-- ~30% of online reviews estimated to be fake (FTC, 2025)
-- EU Digital Services Act now requires platforms to fight fake reviews
+- **Fakespot**: Shut down July 1, 2025 (Mozilla discontinued)
+- **ReviewMeta**: Down since early 2026 (no announcement)
+- **~30%** of online reviews estimated to be fake (FTC, 2025)
+- **EU Digital Services Act** now requires platforms to fight fake reviews
+- **$152B** in global consumer spending influenced by fake reviews annually
 
 ## Tech Stack
 
@@ -115,6 +162,14 @@ curl -X POST http://localhost:8000/analyze \
 | Free tier | 10 checks/day |
 | Pro | $9/mo — unlimited, all platforms |
 | API | $0.05/req |
+
+## Deployment
+
+| Method | Command | Notes |
+|--------|---------|-------|
+| Local dev | `make dev` | Hot reload |
+| Production | `make deploy` | 2 uvicorn workers |
+| Docker | `make deploy-docker` | docker compose + healthcheck |
 
 ---
 
