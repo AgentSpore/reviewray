@@ -10,6 +10,7 @@ class Platform(str, Enum):
     amazon = "amazon"
     wildberries = "wildberries"
     yandex_maps = "yandex_maps"
+    ozon = "ozon"
     google_maps = "google_maps"
     unknown = "unknown"
 
@@ -52,6 +53,7 @@ class AnalysisResponse(BaseModel):
     signals: list[Signal]
     verdict: str              # Human-readable summary
     analyzed_at: str
+    warning: Optional[str] = None
     error: Optional[str] = None
 
 

@@ -1,11 +1,13 @@
 """Platform scrapers for ReviewRay.
 
-Supports: Amazon (US/UK/DE/FR/…), Wildberries.
+Supports: Amazon, Wildberries, Yandex Maps, Ozon.
 Each scraper returns a raw dict with product_name, total_reviews, reviews[].
 
 Strategy:
   - Amazon: scrape main product page (/dp/) — review pages return captcha.
-  - Wildberries: scrape HTML product page — old JSON API (card.wb.ru) is dead.
+  - Wildberries: search API + feedbacks API (old card.wb.ru is dead). Rate-limited.
+  - Yandex Maps: SSR page with review data embedded in HTML.
+  - Ozon: requires Playwright (headless browser) — heavy anti-bot protection.
 """
 from __future__ import annotations
 
@@ -39,6 +41,8 @@ def detect_platform(url: str) -> Platform:
         return Platform.wildberries
     if "yandex.ru/maps" in url_lower or "yandex.com/maps" in url_lower:
         return Platform.yandex_maps
+    if "ozon.ru" in url_lower:
+        return Platform.ozon
     if "google.com/maps" in url_lower or "maps.google" in url_lower or "goo.gl/maps" in url_lower:
         return Platform.google_maps
     return Platform.unknown
@@ -398,16 +402,154 @@ def scrape_yandex_maps(url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Ozon — requires Playwright (heavy anti-bot protection)
+# ---------------------------------------------------------------------------
+
+def _ozon_extract_product_id(url: str) -> Optional[str]:
+    m = re.search(r'/product/[^/]*?(\d{5,15})/?', url)
+    if m:
+        return m.group(1)
+    m = re.search(r'/product/(\d+)', url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def scrape_ozon(url: str) -> dict:
+    product_id = _ozon_extract_product_id(url)
+    if not product_id:
+        raise ValueError(f"Cannot extract product ID from Ozon URL: {url}")
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(
+            "Ozon requires Playwright for scraping. "
+            "Install: pip install playwright && playwright install chromium"
+        )
+
+    product_name = None
+    total_reviews = 0
+    avg_rating = 0.0
+    histogram = {}
+    reviews = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            locale="ru-RU",
+        )
+        page = ctx.new_page()
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            html = page.content()
+
+            # --- Product name ---
+            m = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
+            if m:
+                product_name = m.group(1).strip()
+
+            # --- JSON-LD ---
+            ld_blocks = re.findall(
+                r'type="application/ld\+json">(.*?)</script>', html, re.DOTALL
+            )
+            for block in ld_blocks:
+                try:
+                    data = json.loads(block)
+                    if data.get("@type") == "Product":
+                        product_name = product_name or data.get("name", "")
+                        ar = data.get("aggregateRating", {})
+                        if ar:
+                            avg_rating = float(ar.get("ratingValue", 0))
+                            total_reviews = int(ar.get("reviewCount", 0))
+                        for rev in data.get("review", [])[:20]:
+                            stars = None
+                            rr = rev.get("reviewRating", {})
+                            if rr:
+                                stars = float(rr.get("ratingValue", 0))
+                            reviews.append({
+                                "text": rev.get("reviewBody", "")[:500],
+                                "stars": stars,
+                                "verified": True,
+                                "date": rev.get("datePublished", ""),
+                                "reviewer": rev.get("author", {}).get("name", ""),
+                            })
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            # --- Fallback: regex patterns ---
+            if not total_reviews:
+                m = re.search(r'"reviewCount"\s*:\s*"?(\d+)"?', html)
+                if m:
+                    total_reviews = int(m.group(1))
+
+            if not avg_rating:
+                m = re.search(r'"ratingValue"\s*:\s*"?([\d.]+)"?', html)
+                if m:
+                    avg_rating = float(m.group(1))
+
+            # --- Histogram from individual review ratings ---
+            if reviews:
+                star_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+                for r in reviews:
+                    s = r.get("stars")
+                    if s and 1 <= int(s) <= 5:
+                        star_counts[int(s)] += 1
+                total_fb = sum(star_counts.values()) or 1
+                histogram = {k: round(v * 100 / total_fb) for k, v in star_counts.items()}
+
+        finally:
+            browser.close()
+
+    return {
+        "platform": "ozon",
+        "product_name": product_name or f"Ozon #{product_id}",
+        "total_reviews": total_reviews,
+        "avg_rating": avg_rating,
+        "histogram": histogram,
+        "reviews": reviews,
+        "product_id": product_id,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
+# Platform-specific warnings shown to users
+PLATFORM_WARNINGS = {
+    "wildberries": (
+        "⚠️ Wildberries агрессивно ограничивает запросы (rate-limiting). "
+        "Результат может быть неполным или недоступным. "
+        "При ошибке попробуйте позже."
+    ),
+    "ozon": (
+        "⚠️ Ozon использует тяжёлую anti-bot защиту. "
+        "Анализ может занять 10-15 секунд. Требуется Playwright."
+    ),
+}
+
 
 def scrape(url: str) -> dict:
     platform = detect_platform(url)
     if platform == Platform.amazon:
-        return scrape_amazon(url)
+        result = scrape_amazon(url)
     elif platform == Platform.wildberries:
-        return scrape_wildberries(url)
+        result = scrape_wildberries(url)
     elif platform == Platform.yandex_maps:
-        return scrape_yandex_maps(url)
+        result = scrape_yandex_maps(url)
+    elif platform == Platform.ozon:
+        result = scrape_ozon(url)
     else:
         raise ValueError(f"Platform not supported yet: {url}")
+
+    # Attach platform warning if applicable
+    warning = PLATFORM_WARNINGS.get(result.get("platform"))
+    if warning:
+        result["warning"] = warning
+
+    return result
