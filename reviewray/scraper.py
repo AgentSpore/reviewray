@@ -415,13 +415,13 @@ def _ozon_extract_product_id(url: str) -> Optional[str]:
     return None
 
 
-def scrape_ozon(url: str) -> dict:
+async def scrape_ozon(url: str) -> dict:
     product_id = _ozon_extract_product_id(url)
     if not product_id:
         raise ValueError(f"Cannot extract product ID from Ozon URL: {url}")
 
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError:
         raise RuntimeError(
             "Ozon requires Playwright for scraping. "
@@ -434,19 +434,19 @@ def scrape_ozon(url: str) -> dict:
     histogram = {}
     reviews = []
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        ctx = await browser.new_context(
             user_agent=HEADERS["User-Agent"],
             locale="ru-RU",
         )
-        page = ctx.new_page()
+        page = await ctx.new_page()
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
 
-            html = page.content()
+            html = await page.content()
 
             # --- Product name ---
             m = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
@@ -503,7 +503,7 @@ def scrape_ozon(url: str) -> dict:
                 histogram = {k: round(v * 100 / total_fb) for k, v in star_counts.items()}
 
         finally:
-            browser.close()
+            await browser.close()
 
     return {
         "platform": "ozon",
@@ -534,7 +534,7 @@ PLATFORM_WARNINGS = {
 }
 
 
-def scrape(url: str) -> dict:
+async def scrape(url: str) -> dict:
     platform = detect_platform(url)
     if platform == Platform.amazon:
         result = scrape_amazon(url)
@@ -543,7 +543,7 @@ def scrape(url: str) -> dict:
     elif platform == Platform.yandex_maps:
         result = scrape_yandex_maps(url)
     elif platform == Platform.ozon:
-        result = scrape_ozon(url)
+        result = await scrape_ozon(url)
     else:
         raise ValueError(f"Platform not supported yet: {url}")
 

@@ -69,7 +69,7 @@ async def analyze_url(body: AnalysisRequest):
         )
 
     try:
-        scraped = scrape(url)
+        scraped = await scrape(url)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
