@@ -13,17 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv
 RUN pip install uv
 
-# Copy dependency files first for layer caching
+# Copy source (hatchling needs package dir to resolve during uv sync)
 COPY pyproject.toml .python-version ./
+COPY reviewray/ reviewray/
 
 # Install dependencies
 RUN uv sync --no-dev
 
 # Install Playwright browsers
 RUN uv run playwright install chromium
-
-# Copy application code
-COPY reviewray/ reviewray/
 
 EXPOSE 8000
 
