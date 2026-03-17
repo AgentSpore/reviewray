@@ -9,6 +9,7 @@ from pydantic import BaseModel, HttpUrl, field_validator
 class Platform(str, Enum):
     amazon = "amazon"
     wildberries = "wildberries"
+    yandex_maps = "yandex_maps"
     google_maps = "google_maps"
     unknown = "unknown"
 

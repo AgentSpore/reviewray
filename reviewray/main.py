@@ -34,7 +34,7 @@ app = FastAPI(
     description=(
         "Paste any product URL — get a Trust Score 0–100 showing "
         "whether reviews are organic or manipulated. "
-        "Supports Amazon, Wildberries."
+        "Supports Amazon, Wildberries, Yandex Maps."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -62,7 +62,8 @@ async def analyze_url(body: AnalysisRequest):
             detail=(
                 "Платформа не поддерживается. "
                 "Поддерживаются: Amazon (amazon.com/.co.uk/.de и др.), "
-                "Wildberries (wildberries.ru)."
+                "Wildberries (wildberries.ru), "
+                "Яндекс.Карты (yandex.ru/maps/org/...)."
             ),
         )
 

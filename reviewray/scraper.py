@@ -37,6 +37,8 @@ def detect_platform(url: str) -> Platform:
         return Platform.amazon
     if "wildberries.ru" in url_lower or "wb.ru" in url_lower:
         return Platform.wildberries
+    if "yandex.ru/maps" in url_lower or "yandex.com/maps" in url_lower:
+        return Platform.yandex_maps
     if "google.com/maps" in url_lower or "maps.google" in url_lower or "goo.gl/maps" in url_lower:
         return Platform.google_maps
     return Platform.unknown
@@ -282,6 +284,120 @@ def scrape_wildberries(url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Yandex Maps — scrape /org/ reviews page (SSR includes review data)
+# ---------------------------------------------------------------------------
+
+def _ym_extract_org_id(url: str) -> Optional[str]:
+    m = re.search(r'/org/[^/]+/(\d+)', url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def scrape_yandex_maps(url: str) -> dict:
+    org_id = _ym_extract_org_id(url)
+    if not org_id:
+        raise ValueError(f"Cannot extract org ID from Yandex Maps URL: {url}")
+
+    # Ensure we're hitting the reviews page for maximum data
+    base_url = re.sub(r'(/\d+)/.*', r'\1/', url)
+    reviews_url = base_url + "reviews/"
+
+    try:
+        html = _fetch_html(reviews_url)
+    except Exception as e:
+        # Fallback: try the org page itself
+        try:
+            html = _fetch_html(base_url)
+        except Exception as e2:
+            raise RuntimeError(f"Failed to fetch Yandex Maps page: {e2}")
+
+    # --- Org name ---
+    org_name = None
+    m = re.search(r'<title>(?:Отзывы о «|)([^<|–"]+)', html)
+    if m:
+        org_name = m.group(1).replace("»", "").strip()
+    if not org_name:
+        m = re.search(r'"orgName"\s*:\s*"([^"]+)"', html)
+        if m:
+            org_name = m.group(1).strip()
+
+    # --- Rating + review count ---
+    avg_rating = 0.0
+    total_reviews = 0
+
+    m = re.search(r'"rating"\s*:\s*([\d.]+)', html)
+    if m:
+        avg_rating = float(m.group(1))
+
+    m = re.search(r'"reviewCount"\s*:\s*"?(\d+)"?', html)
+    if m:
+        total_reviews = int(m.group(1))
+
+    # --- Rating distribution from individual review ratings ---
+    all_ratings = re.findall(r'"rating"\s*:\s*(\d)\s*[,}]', html)
+    star_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for r in all_ratings:
+        s = int(r)
+        if 1 <= s <= 5:
+            star_counts[s] += 1
+
+    histogram = {}
+    total_fb = sum(star_counts.values())
+    if total_fb > 0:
+        histogram = {k: round(v * 100 / total_fb) for k, v in star_counts.items()}
+
+    # --- Review texts ---
+    # Yandex Maps SSR includes review texts as "text":"..." fields
+    # Filter out UI/system texts by length and content
+    all_texts = re.findall(r'"text"\s*:\s*"([^"]{30,})"', html)
+    # Filter out system/UI texts
+    review_texts = [
+        t for t in all_texts
+        if not any(skip in t.lower() for skip in [
+            "лента", "alice ai", "created by", "экспериментальный",
+            "способ поиска", "облегчить поиск",
+        ])
+    ]
+
+    # --- Review dates ---
+    dates = re.findall(r'"updatedTime"\s*:\s*"([^"]+)"', html)
+
+    # --- Build review objects ---
+    reviews = []
+    review_ids = re.findall(r'"reviewId"\s*:\s*"([^"]+)"', html)
+
+    for i, text in enumerate(review_texts[:30]):
+        # Unescape
+        text = (text
+                .replace("\\n", " ")
+                .replace("\\u003c", "<")
+                .replace("\\u003e", ">")
+                .replace("\\u0026", "&")
+                .replace("\\u0022", '"')
+                .replace("\xa0", " "))
+        text = re.sub(r"<[^>]+>", "", text).strip()
+
+        reviews.append({
+            "text": text[:500],
+            "stars": int(all_ratings[i]) if i < len(all_ratings) else None,
+            "verified": False,  # Yandex Maps doesn't expose verification
+            "date": dates[i][:10] if i < len(dates) else None,
+            "reviewer": "",
+        })
+
+    return {
+        "platform": "yandex_maps",
+        "product_name": org_name or f"Yandex Maps Org #{org_id}",
+        "total_reviews": total_reviews or total_fb,
+        "avg_rating": avg_rating,
+        "histogram": histogram,
+        "reviews": reviews,
+        "org_id": org_id,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -291,5 +407,7 @@ def scrape(url: str) -> dict:
         return scrape_amazon(url)
     elif platform == Platform.wildberries:
         return scrape_wildberries(url)
+    elif platform == Platform.yandex_maps:
+        return scrape_yandex_maps(url)
     else:
         raise ValueError(f"Platform not supported yet: {url}")
