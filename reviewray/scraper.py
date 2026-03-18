@@ -159,25 +159,38 @@ def scrape_amazon(url: str) -> dict:
 # Wildberries — HTML scraping (card.wb.ru JSON API is dead since 2026)
 # ---------------------------------------------------------------------------
 
-def _wb_extract_article(url: str) -> Optional[str]:
+def _wb_extract_ids(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract nm (article) and imtId from WB URL."""
+    nm = None
+    imt_id = None
+
     m = re.search(r"/catalog/(\d+)/", url)
     if m:
-        return m.group(1)
-    m = re.search(r"[?&](?:nm|id)=(\d+)", url)
+        nm = m.group(1)
+    if not nm:
+        m = re.search(r"[?&](?:nm|id)=(\d+)", url)
+        if m:
+            nm = m.group(1)
+    if not nm:
+        m = re.search(r"/(\d{6,10})(?:/|$)", url)
+        if m:
+            nm = m.group(1)
+
+    # imtId from query params — this is the real feedback ID
+    m = re.search(r"[?&]imtId=(\d+)", url, re.I)
     if m:
-        return m.group(1)
-    m = re.search(r"/(\d{6,10})(?:/|$)", url)
-    if m:
-        return m.group(1)
-    return None
+        imt_id = m.group(1)
+
+    return nm, imt_id
 
 
 def scrape_wildberries(url: str) -> dict:
-    article = _wb_extract_article(url)
-    if not article:
+    nm_str, imt_id_str = _wb_extract_ids(url)
+    if not nm_str:
         raise ValueError(f"Cannot extract article from WB URL: {url}")
 
-    nm = int(article)
+    nm = int(nm_str)
+    imt_id = int(imt_id_str) if imt_id_str else None
 
     product_name = f"WB #{nm}"
     total_reviews = 0
@@ -217,64 +230,103 @@ def scrape_wildberries(url: str) -> dict:
     except Exception:
         pass  # Will try feedbacks API with nm as fallback
 
-    # --- Step 2: Try feedbacks API (v2 with real_id, then v1 with nm) ---
-    for fb_id, ver in [(real_id, "v2"), (nm, "v2"), (real_id, "v1"), (nm, "v1")]:
+    # --- Step 2: Try feedbacks API — prioritize imtId from URL, then search result, then nm ---
+    fb_candidates = []
+    if imt_id:
+        fb_candidates.append((imt_id, "v2"))
+        fb_candidates.append((imt_id, "v1"))
+    if real_id != nm:
+        fb_candidates.append((real_id, "v2"))
+        fb_candidates.append((real_id, "v1"))
+    fb_candidates.append((nm, "v2"))
+    fb_candidates.append((nm, "v1"))
+
+    MAX_PAGES = 10  # max 10k feedbacks scanned
+    PAGE_SIZE = 1000
+
+    for fb_id, ver in fb_candidates:
         if reviews:
             break
-        feedbacks_url = f"https://feedbacks1.wb.ru/feedbacks/{ver}/{fb_id}"
-        try:
-            req = urllib.request.Request(
-                feedbacks_url,
-                headers={
-                    "User-Agent": HEADERS["User-Agent"],
-                    "Accept": "application/json",
-                    "Accept-Encoding": "gzip, deflate",
-                },
+
+        seen_ids = set()
+        has_nm_filter = False
+
+        for skip in range(0, MAX_PAGES * PAGE_SIZE, PAGE_SIZE):
+            feedbacks_url = (
+                f"https://feedbacks1.wb.ru/feedbacks/{ver}/{fb_id}"
+                f"?take={PAGE_SIZE}&skip={skip}"
             )
-            time.sleep(random.uniform(0.3, 0.6))
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read()
-                try:
-                    fb_data = json.loads(raw)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    import gzip
-                    fb_data = json.loads(gzip.decompress(raw))
+            try:
+                req = urllib.request.Request(
+                    feedbacks_url,
+                    headers={
+                        "User-Agent": HEADERS["User-Agent"],
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip, deflate",
+                    },
+                )
+                time.sleep(random.uniform(0.3, 0.5))
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    raw = resp.read()
+                    try:
+                        fb_data = json.loads(raw)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        import gzip
+                        fb_data = json.loads(gzip.decompress(raw))
 
-            feedbacks = fb_data.get("feedbacks") or []
-            if not feedbacks:
-                continue
+                batch = fb_data.get("feedbacks") or []
+                if not batch:
+                    break
 
-            # Update product info from feedbacks response if search failed
-            if fb_data.get("valuation"):
-                avg_rating = avg_rating or float(fb_data["valuation"])
-            if fb_data.get("feedbackCount"):
-                total_reviews = total_reviews or fb_data["feedbackCount"]
+                # First page: get product-level metadata
+                if skip == 0:
+                    if fb_data.get("valuation"):
+                        avg_rating = avg_rating or float(fb_data["valuation"])
 
-            # Extract distribution from API if available
-            vd = fb_data.get("valuationDistribution") or {}
-            if vd:
-                total_vd = sum(int(v) for v in vd.values()) or 1
-                histogram = {int(k): round(int(v) * 100 / total_vd) for k, v in vd.items()}
+                # Filter by nm variant if matches exist
+                nm_batch = [fb for fb in batch if fb.get("nmId") == nm]
+                if nm_batch and not has_nm_filter:
+                    has_nm_filter = True
 
+                target_batch = nm_batch if has_nm_filter else batch
+
+                new_in_page = 0
+                for fb in target_batch:
+                    fb_id_val = fb.get("id", "")
+                    if fb_id_val in seen_ids:
+                        continue
+                    seen_ids.add(fb_id_val)
+                    new_in_page += 1
+
+                    stars = fb.get("productValuation", 0)
+                    reviews.append({
+                        "text": fb.get("text", "")[:500],
+                        "stars": stars,
+                        "verified": True,
+                        "date": fb.get("createdDate", "")[:10],
+                        "reviewer": fb.get("wbUserDetails", {}).get("name", ""),
+                    })
+
+                # Stop if no new reviews found (all duplicates)
+                if new_in_page == 0:
+                    break
+                if len(batch) < PAGE_SIZE:
+                    break
+
+            except Exception:
+                break
+
+        # Build stats from collected reviews
+        if reviews:
+            total_reviews = len(reviews)
             star_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-            for fb in feedbacks:
-                stars = fb.get("productValuation", 0)
-                if 1 <= stars <= 5:
-                    star_counts[stars] += 1
-                reviews.append({
-                    "text": fb.get("text", "")[:500],
-                    "stars": stars,
-                    "verified": True,
-                    "date": fb.get("createdDate", "")[:10],
-                    "reviewer": fb.get("wbUserDetails", {}).get("name", ""),
-                })
-
-            if not histogram and feedbacks:
-                total_fb = sum(star_counts.values()) or 1
-                histogram = {k: round(v * 100 / total_fb) for k, v in star_counts.items()}
-
-        except Exception:
-            continue
+            for r in reviews:
+                s = r.get("stars", 0)
+                if 1 <= s <= 5:
+                    star_counts[s] += 1
+            total_fb = sum(star_counts.values()) or 1
+            histogram = {k: round(v * 100 / total_fb) for k, v in star_counts.items()}
+            break
 
     return {
         "platform": "wildberries",
@@ -435,18 +487,45 @@ async def scrape_ozon(url: str) -> dict:
     reviews = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
         ctx = await browser.new_context(
-            user_agent=HEADERS["User-Agent"],
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
             locale="ru-RU",
+            viewport={"width": 1920, "height": 1080},
+            java_script_enabled=True,
         )
         page = await ctx.new_page()
 
+        # Stealth: remove webdriver flag
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = {runtime: {}};
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['ru-RU', 'ru', 'en-US', 'en']});
+        """)
+
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(4000)
 
             html = await page.content()
+
+            # --- Check for CAPTCHA ---
+            if "подтвердите" in html.lower() and "бот" in html.lower():
+                raise RuntimeError(
+                    "Ozon показал CAPTCHA — сервер распознан как бот. "
+                    "Попробуйте позже или используйте другой IP."
+                )
 
             # --- Product name ---
             m = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
